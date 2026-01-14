@@ -74,13 +74,7 @@ def generate_message(data: dict) -> str:
 
 def pre_generate_audio(call_id: str, data: dict) -> None:
     """Pre-generate and cache audio for a call (runs in background thread)."""
-    import time
     message = generate_message(data)
-    # #region agent log
-    start_time = time.time()
-    with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-        f.write('{"location":"server.py:pre_generate_audio:start","message":"Starting audio pre-generation (background)","data":{"call_id":"'+call_id+'","message_len":'+str(len(message))+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A,D"}\n')
-    # #endregion
     print(f"Pre-generating audio for call {call_id}: {message}")
 
     try:
@@ -97,11 +91,6 @@ def pre_generate_audio(call_id: str, data: dict) -> None:
         audio_bytes.seek(0)
 
         audio_cache[call_id] = audio_bytes.read()
-        # #region agent log
-        elapsed = time.time() - start_time
-        with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-            f.write('{"location":"server.py:pre_generate_audio:end","message":"Audio pre-generation complete (background)","data":{"call_id":"'+call_id+'","bytes":'+str(len(audio_cache[call_id]))+', "elapsed_seconds":'+str(round(elapsed, 2))+', "cache_keys":'+str(len(audio_cache))+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A,D"}\n')
-        # #endregion
         print(f"Audio pre-generated for call {call_id} ({len(audio_cache[call_id])} bytes)")
     except Exception as e:
         print(f"Error pre-generating audio for call {call_id}: {e}")
@@ -128,11 +117,6 @@ def initiate_call(data: CallRequest):
     audio_thread.start()
 
     # Initiate Twilio call with status callback
-    # #region agent log
-    import time
-    with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-        f.write('{"location":"server.py:initiate_call:twilio_start","message":"Initiating Twilio call (audio generating in background)","data":{"call_id":"'+call_id+'","phone":"'+data.phone+'","cache_ready":'+str(call_id in audio_cache).lower()+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"E"}\n')
-    # #endregion
     twilio_client = Client(ACCOUNT_SID, AUTH_TOKEN)
     call = twilio_client.calls.create(
         to=data.phone,
@@ -150,10 +134,6 @@ def initiate_call(data: CallRequest):
         "outcome": "pending",
     }
 
-    # #region agent log
-    with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-        f.write('{"location":"server.py:initiate_call:twilio_done","message":"Twilio call initiated (fast response)","data":{"call_id":"'+call_id+'","call_sid":"'+call.sid+'"},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"E"}\n')
-    # #endregion
     print(f"Call initiated! SID: {call.sid}, Call ID: {call_id}")
     return {"callSid": call.sid, "callId": call_id}
 
@@ -178,18 +158,9 @@ def get_twiml(call_id: str):
 @app.get("/audio/{call_id}")
 def get_audio(call_id: str):
     """Return pre-generated audio for a specific call (instant response)."""
-    import time
-    # #region agent log
-    with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-        f.write('{"location":"server.py:get_audio","message":"Audio endpoint called","data":{"call_id":"'+call_id+'","in_cache":'+str(call_id in audio_cache).lower()+',"cache_keys":'+str(list(audio_cache.keys())[:5]).replace("'", '"')+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A,C"}\n')
-    # #endregion
     # Check cache first (should be pre-generated)
     if call_id in audio_cache:
         print(f"Serving cached audio for call {call_id}")
-        # #region agent log
-        with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-            f.write('{"location":"server.py:get_audio:cache_hit","message":"CACHE HIT - serving instantly","data":{"call_id":"'+call_id+'","bytes":'+str(len(audio_cache[call_id]))+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A,C"}\n')
-        # #endregion
         return Response(content=audio_cache[call_id], media_type="audio/mpeg")
 
     # Fallback to on-demand generation if cache miss
@@ -198,11 +169,6 @@ def get_audio(call_id: str):
 
     data = call_data_store[call_id]
     message = generate_message(data)
-
-    # #region agent log
-    with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-        f.write('{"location":"server.py:get_audio:cache_miss","message":"CACHE MISS - generating on demand (background thread not finished yet)","data":{"call_id":"'+call_id+'"},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A,C"}\n')
-    # #endregion
     print(f"Cache miss - generating audio for call {call_id}: {message}")
 
     audio_generator = elevenlabs_client.text_to_speech.convert(
@@ -284,19 +250,10 @@ async def call_status_webhook(
 
     # Clean up audio cache when call completes
     if CallStatus in ["completed", "busy", "failed", "canceled", "no-answer"]:
-        import time
-        # #region agent log
-        with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-            f.write('{"location":"server.py:webhook:cleanup","message":"Cleanup triggered","data":{"CallSid":"'+CallSid+'","CallStatus":"'+CallStatus+'","cache_keys_before":'+str(list(audio_cache.keys())[:5]).replace("'", '"')+'},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","hypothesisId":"B"}\n')
-        # #endregion
         # Find and clean up associated call_id
         for call_id in list(audio_cache.keys()):
             if call_id in call_data_store:
                 audio_cache.pop(call_id, None)
-                # #region agent log
-                with open("/Users/cero/projects/connectathon-2026/.cursor/debug.log", "a") as f:
-                    f.write('{"location":"server.py:webhook:cleanup:removed","message":"Removed from cache","data":{"call_id":"'+call_id+'"},"timestamp":'+str(int(time.time()*1000))+',"sessionId":"debug-session","hypothesisId":"B"}\n')
-                # #endregion
                 print(f"Cleaned up audio cache for call {call_id}")
 
     print(f"Updated call status store: {CallSid} -> {outcome}")
